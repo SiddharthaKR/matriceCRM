@@ -2,7 +2,8 @@ package controllers
 
 import (
 	"context"
-	"fmt"
+	// "fmt"
+	"log"
 	"net/http"
 	"time"
 
@@ -19,7 +20,16 @@ var companyCollection *mongo.Collection = database.OpenCollection(database.Clien
 // CreateCompany creates a new company and updates user company IDs
 func CreateCompany() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// Extract user ID from context
+		userID, exists := c.Get("uid")
+		if !exists {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+			return
+		}
+
 		var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
+		defer cancel()
+
 		var company models.Company
 
 		if err := c.BindJSON(&company); err != nil {
@@ -33,21 +43,19 @@ func CreateCompany() gin.HandlerFunc {
 
 		// Insert the company
 		resultInsertionNumber, insertErr := companyCollection.InsertOne(ctx, company)
-		defer cancel()
 		if insertErr != nil {
-			msg := fmt.Sprintf("Company item was not created")
-			c.JSON(http.StatusInternalServerError, gin.H{"error": msg})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Company item was not created"})
 			return
 		}
 
-		// Update user documents to include the new company ID
-		_, err := userCollection.UpdateMany(
+		// Update the current user's document to include the new company ID
+		_, err := userCollection.UpdateOne(
 			ctx,
-			bson.M{},
-			bson.M{"$push": bson.M{"company_ids": company.ID}},
+			bson.M{"user_id": userID},
+			bson.M{"$push": bson.M{"CompanyIDs": company.ID}},
 		)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error occurred while updating users with the new company ID"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error occurred while updating user with the new company ID"})
 			return
 		}
 
@@ -55,43 +63,86 @@ func CreateCompany() gin.HandlerFunc {
 	}
 }
 
+
 // DeleteCompany removes a company and updates user company IDs
 func DeleteCompany() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		companyID := c.Param("company_id")
-		var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
+		companyIDParam := c.Param("company_id") // Keep this as a string
+		userID := c.GetString("uid")
 
-		// Remove the company
-		result, err := companyCollection.DeleteOne(ctx, bson.M{"_id": companyID})
+		var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
 		defer cancel()
+
+		// Convert companyIDParam to ObjectID
+		companyObjectID, err := primitive.ObjectIDFromHex(companyIDParam) // Convert to ObjectID
 		if err != nil {
+			log.Println("Invalid company ID format:", companyIDParam)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid company ID"})
+			return
+		}
+
+		// Check if the user has access to this company
+		if !checkUserAccessToCompany(userID, companyObjectID) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "You do not have access to this company"})
+			return
+		}
+
+		// Attempt to delete the company using the ObjectID
+		result, err := companyCollection.DeleteOne(ctx, bson.M{"_id": companyObjectID})
+		if err != nil {
+			log.Println("Error occurred while deleting company:", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error occurred while deleting company"})
 			return
 		}
 
+		if result.DeletedCount == 0 {
+			log.Println("No company found with ID:", companyIDParam)
+			c.JSON(http.StatusNotFound, gin.H{"error": "Company not found"})
+			return
+		}
+
 		// Remove the company ID from all users
-		_, err = userCollection.UpdateMany(
+		updateResult, err := userCollection.UpdateMany(
 			ctx,
 			bson.M{},
-			bson.M{"$pull": bson.M{"company_ids": companyID}},
+			bson.M{"$pull": bson.M{"CompanyIDs": companyObjectID}}, // Use companyObjectID here
 		)
 		if err != nil {
+			log.Println("Error occurred while updating users after company deletion:", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error occurred while updating users after company deletion"})
 			return
 		}
 
-		c.JSON(http.StatusOK, result)
+		log.Println("Company deleted successfully. Company ID:", companyIDParam)
+		log.Println("Users updated. Matched count:", updateResult.MatchedCount, "Modified count:", updateResult.ModifiedCount)
+
+		c.JSON(http.StatusOK, gin.H{"message": "Company deleted successfully", "deleted_count": result.DeletedCount})
 	}
 }
+
 
 // GetCompany retrieves a single company by ID
 func GetCompany() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		companyID := c.Param("company_id")
+		userID := c.GetString("uid")
 		var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
 
+		// Convert companyIDParam to ObjectID
+		companyObjectID, err := primitive.ObjectIDFromHex(companyID) // Convert to ObjectID
+		if err != nil {
+			log.Println("Invalid company ID format:", companyID)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid company ID"})
+			return
+		}
+
+        // Check if the user has access to this company
+		if !checkUserAccessToCompany(userID, companyObjectID) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "You do not have access to this company"})
+			return
+		}
 		var company models.Company
-		err := companyCollection.FindOne(ctx, bson.M{"_id": companyID}).Decode(&company)
+		err = companyCollection.FindOne(ctx, bson.M{"_id": companyID}).Decode(&company)
 		defer cancel()
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "error occurred while fetching company"})

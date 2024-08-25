@@ -18,6 +18,7 @@ import (
 
 var userCollection *mongo.Collection = database.OpenCollection(database.Client, "user")
 
+
 func Signup() gin.HandlerFunc {
 
 	return func(c *gin.Context) {
@@ -116,7 +117,7 @@ func Login() gin.HandlerFunc {
 	}
 }
 
-func GetUsers() gin.HandlerFunc {
+func GetAllUsers() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if err := helper.CheckUserType(c, "ADMIN"); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -178,5 +179,98 @@ func GetUser() gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, user)
+	}
+}
+
+func UpdateUser() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID := c.Param("user_id")
+
+		if err := helper.MatchUserTypeToUid(c, userID); err != nil {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
+
+		var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
+		defer cancel()
+
+		var updatedUser models.User
+		if err := c.BindJSON(&updatedUser); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Prepare update document
+		update := bson.M{}
+		if updatedUser.FirstName != nil {
+			update["first_name"] = updatedUser.FirstName
+		}
+		if updatedUser.LastName != nil {
+			update["last_name"] = updatedUser.LastName
+		}
+		if updatedUser.Email != nil {
+			update["email"] = updatedUser.Email
+		}
+		if updatedUser.Phone != nil {
+			update["phone"] = updatedUser.Phone
+		}
+		if updatedUser.Status != nil {
+			update["status"] = updatedUser.Status
+		}
+		if updatedUser.Notes != nil {
+			update["notes"] = updatedUser.Notes
+		}
+		if updatedUser.UserType != nil {
+			update["user_type"] = updatedUser.UserType
+		}
+
+		if len(update) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "No fields to update"})
+			return
+		}
+
+		// Perform the update
+		result, err := userCollection.UpdateOne(ctx, bson.M{"user_id": userID}, bson.M{"$set": update})
+		if err != nil {
+			log.Println("Error updating user:", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error occurred while updating user"})
+			return
+		}
+
+		if result.MatchedCount == 0 {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"message": "User updated successfully"})
+	}
+}
+
+
+func DeleteUser() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if err := helper.CheckUserType(c, "ADMIN"); err != nil {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
+
+		userID := c.Param("user_id")
+		var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
+		defer cancel()
+
+		// Delete user
+		result, err := userCollection.DeleteOne(ctx, bson.M{"user_id": userID})
+		if err != nil {
+			log.Println("Error deleting user:", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error occurred while deleting user"})
+			return
+		}
+
+		if result.DeletedCount == 0 {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"message": "User deleted successfully"})
 	}
 }
