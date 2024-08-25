@@ -1,9 +1,9 @@
 package routes
 
 import (
+	"github.com/SiddharthaKR/golang-jwt-project/controllers"
+	"github.com/SiddharthaKR/golang-jwt-project/middleware"
 	"github.com/gin-gonic/gin"
-	"github.com/akhil/golang-jwt-project/controllers"
-	"github.com/akhil/golang-jwt-project/middleware"
 )
 
 func CompanyRoutes(incomingRoutes *gin.Engine) {

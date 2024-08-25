@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/SiddharthaKR/golang-jwt-project/database"
+	"github.com/SiddharthaKR/golang-jwt-project/models"
 	"github.com/gin-gonic/gin"
-	"github.com/akhil/golang-jwt-project/models"
-	"github.com/akhil/golang-jwt-project/database"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"

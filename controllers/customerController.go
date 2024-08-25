@@ -1,25 +1,24 @@
-package controllers 
+package controllers
 
 import (
 	"context"
 	"fmt"
-	"log"
-	"strconv"
-	"net/http"
-	"time"
+	"github.com/SiddharthaKR/golang-jwt-project/database"
+	helper "github.com/SiddharthaKR/golang-jwt-project/helpers"
+	"github.com/SiddharthaKR/golang-jwt-project/models"
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
-	helper "github.com/akhil/golang-jwt-project/helpers"
-	"github.com/akhil/golang-jwt-project/models"
-	"github.com/akhil/golang-jwt-project/database"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"log"
+	"net/http"
+	"strconv"
+	"time"
 )
 
 var customerCollection *mongo.Collection = database.OpenCollection(database.Client, "customer")
 var validate = validator.New()
-
 
 func CustomerSignup() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -71,7 +70,7 @@ func CustomerSignup() gin.HandlerFunc {
 		customer.UpdatedAt, _ = time.Parse(time.RFC3339, time.Now().Format(time.RFC3339))
 		customer.ID = primitive.NewObjectID()
 		customer.CustomerID = customer.ID.Hex()
-		token, refreshToken, _ := helper.GenerateAllTokens(*customer.Email, *customer.FirstName, *customer.LastName,"CUSTOMER", *&customer.CustomerID)
+		token, refreshToken, _ := helper.GenerateAllTokens(*customer.Email, *customer.FirstName, *customer.LastName, "CUSTOMER", *&customer.CustomerID)
 		customer.Token = &token
 		customer.RefreshToken = &refreshToken
 
@@ -94,7 +93,7 @@ func CustomerLogin() gin.HandlerFunc {
 
 		if err := c.BindJSON(&customer); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return 
+			return
 		}
 
 		err := customerCollection.FindOne(ctx, bson.M{"email": customer.Email}).Decode(&foundCustomer)
@@ -115,7 +114,7 @@ func CustomerLogin() gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "customer not found"})
 			return
 		}
-		token, refreshToken, _ := helper.GenerateAllTokens(*foundCustomer.Email, *foundCustomer.FirstName, *foundCustomer.LastName,"CUSTOMER", foundCustomer.CustomerID)
+		token, refreshToken, _ := helper.GenerateAllTokens(*foundCustomer.Email, *foundCustomer.FirstName, *foundCustomer.LastName, "CUSTOMER", foundCustomer.CustomerID)
 		helper.UpdateAllTokens(token, refreshToken, foundCustomer.CustomerID)
 		err = customerCollection.FindOne(ctx, bson.M{"customer_id": foundCustomer.CustomerID}).Decode(&foundCustomer)
 
@@ -134,7 +133,7 @@ func GetCustomers() gin.HandlerFunc {
 			return
 		}
 		var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
-		
+
 		recordPerPage, err := strconv.Atoi(c.Query("recordPerPage"))
 		if err != nil || recordPerPage < 1 {
 			recordPerPage = 10
@@ -149,14 +148,14 @@ func GetCustomers() gin.HandlerFunc {
 
 		matchStage := bson.D{{"$match", bson.D{{}}}}
 		groupStage := bson.D{{"$group", bson.D{
-			{"_id", bson.D{{"_id", "null"}}}, 
-			{"total_count", bson.D{{"$sum", 1}}}, 
+			{"_id", bson.D{{"_id", "null"}}},
+			{"total_count", bson.D{{"$sum", 1}}},
 			{"data", bson.D{{"$push", "$$ROOT"}}}}}}
 		projectStage := bson.D{
 			{"$project", bson.D{
 				{"_id", 0},
 				{"total_count", 1},
-				{"customer_items", bson.D{{"$slice", []interface{}{"$data", startIndex, recordPerPage}}}},}}}
+				{"customer_items", bson.D{{"$slice", []interface{}{"$data", startIndex, recordPerPage}}}}}}}
 		result, err := customerCollection.Aggregate(ctx, mongo.Pipeline{
 			matchStage, groupStage, projectStage})
 		defer cancel()
