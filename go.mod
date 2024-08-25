@@ -1,4 +1,4 @@
-module github.com/akhil/golang-jwt-project
+module github.com/SiddharthaKR/golang-jwt-project
 
 go 1.16
 
