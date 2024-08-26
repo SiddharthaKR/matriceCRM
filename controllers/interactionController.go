@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/SiddharthaKR/golang-jwt-project/database"
+	helper "github.com/SiddharthaKR/golang-jwt-project/helpers"
 	"github.com/SiddharthaKR/golang-jwt-project/models"
 	"github.com/gin-gonic/gin"
 	"go.mongodb.org/mongo-driver/bson"
@@ -14,6 +15,48 @@ import (
 )
 
 var interactionCollection *mongo.Collection = database.OpenCollection(database.Client, "interaction")
+var leadCollection *mongo.Collection = database.OpenCollection(database.Client, "lead")
+
+
+func CreateLead() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if err := helper.CheckUserType(c, "ADMIN"); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
+		defer cancel()
+
+		var lead models.Lead
+
+		// Bind JSON request body to the lead model
+		if err := c.BindJSON(&lead); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Validate the incoming data
+		validationErr := validate.Struct(lead)
+		if validationErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": validationErr.Error()})
+			return
+		}
+
+		// Assign a new ID and set timestamps
+		lead.ID = primitive.NewObjectID()
+		lead.CreatedAt = time.Now()
+		lead.UpdatedAt = time.Now()
+
+		// Insert the new lead into the database
+		result, insertErr := leadCollection.InsertOne(ctx, lead)
+		if insertErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error occurred while adding lead"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"message": "Lead created successfully", "lead_id": result.InsertedID})
+	}
+}
 
 func CreateMeeting() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -224,6 +267,124 @@ func RaiseTicket() gin.HandlerFunc {
         }
 
         c.JSON(http.StatusOK, gin.H{"message": "Ticket raised successfully", "ticket_id": result.InsertedID})
+    }
+}
+
+
+func GetInteractionReport() gin.HandlerFunc {
+    return func(c *gin.Context) {
+		if err := helper.CheckUserType(c, "ADMIN"); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+        var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
+        defer cancel()
+
+        startDate := c.Query("start_date")
+        endDate := c.Query("end_date")
+        interactionType := c.Query("type")
+
+        matchStage := bson.D{}
+        if startDate != "" || endDate != "" {
+            dateFilter := bson.M{}
+            if startDate != "" {
+                start, _ := time.Parse(time.RFC3339, startDate)
+                dateFilter["$gte"] = start
+            }
+            if endDate != "" {
+                end, _ := time.Parse(time.RFC3339, endDate)
+                dateFilter["$lte"] = end
+            }
+            matchStage = append(matchStage, bson.E{"created_at", dateFilter})
+        }
+        if interactionType != "" {
+            matchStage = append(matchStage, bson.E{"type", interactionType})
+        }
+
+        groupStage := bson.D{
+            {"$group", bson.D{
+                {"_id", bson.D{
+                    {"type", "$type"},
+                    {"status", "$status"},
+                    {"day", bson.D{
+                        {"$dateToString", bson.D{
+                            {"format", "%Y-%m-%d"},
+                            {"date", "$created_at"},
+                        }},
+                    }},
+                }},
+                {"count", bson.D{{"$sum", 1}}},
+            }},
+        }
+
+        pipeline := mongo.Pipeline{bson.D{{"$match", matchStage}}, groupStage}
+        cursor, err := interactionCollection.Aggregate(ctx, pipeline)
+        if err != nil {
+            c.JSON(http.StatusInternalServerError, gin.H{"error": "Error fetching interaction reports"})
+            return
+        }
+
+        var results []bson.M
+        if err = cursor.All(ctx, &results); err != nil {
+            c.JSON(http.StatusInternalServerError, gin.H{"error": "Error decoding interaction reports"})
+            return
+        }
+
+        c.JSON(http.StatusOK, results)
+    }
+}
+
+
+func GetConversionRateReport() gin.HandlerFunc {
+    return func(c *gin.Context) {
+		if err := helper.CheckUserType(c, "ADMIN"); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+        var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
+        defer cancel()
+
+        startDate := c.Query("start_date")
+        endDate := c.Query("end_date")
+
+        matchStage := bson.D{}
+        if startDate != "" || endDate != "" {
+            dateFilter := bson.M{}
+            if startDate != "" {
+                start, _ := time.Parse(time.RFC3339, startDate)
+                dateFilter["$gte"] = start
+            }
+            if endDate != "" {
+                end, _ := time.Parse(time.RFC3339, endDate)
+                dateFilter["$lte"] = end
+            }
+            matchStage = append(matchStage, bson.E{"created_at", dateFilter})
+        }
+
+        // Count total leads
+        leadCount, err := leadCollection.CountDocuments(ctx, matchStage)
+        if err != nil {
+            c.JSON(http.StatusInternalServerError, gin.H{"error": "Error counting leads"})
+            return
+        }
+
+        // Count total customers
+        customerCount, err := customerCollection.CountDocuments(ctx, matchStage)
+        if err != nil {
+            c.JSON(http.StatusInternalServerError, gin.H{"error": "Error counting customers"})
+            return
+        }
+
+        conversionRate := 0.0
+        if leadCount > 0 {
+            conversionRate = (float64(customerCount) / float64(leadCount)) * 100
+        }
+
+        c.JSON(http.StatusOK, gin.H{
+            "total_leads":     leadCount,
+            "total_customers": customerCount,
+            "conversion_rate": conversionRate,
+        })
     }
 }
 
