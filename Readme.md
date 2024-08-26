@@ -82,6 +82,7 @@ crm-backend/
 
 5. **Backend is now running at** `http://localhost:9000`
 
+![CRM2](https://github.com/user-attachments/assets/ead8d417-612c-4449-8ddc-8ad64fcc2048)
 
 # Key Components
 
