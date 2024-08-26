@@ -22,14 +22,6 @@ func main() {
 
 	router := gin.New()
 	router.Use(gin.Logger())
-
-	// Base route to provide information and link to API docs
-	router.GET("/", func(c *gin.Context) {
-        c.JSON(200, gin.H{
-            "message": "Welcome to MatriceCRM, a comprehensive CRM application designed to streamline customer management, enhance interaction tracking, and optimize lead management.",
-            "apiDocsLink": "https://github.com/SiddharthaKR/matriceCRM",
-        })
-    })
 	
 	routes.AuthRoutes(router)
 	routes.UserRoutes(router)
