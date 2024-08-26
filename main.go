@@ -28,7 +28,8 @@ func main() {
 	routes.CustomerRoutes(router)
 	routes.CompanyRoutes(router)
 	routes.InteractionRoutes(router)
-
+	routes.EmailRoutes(router)
+	
 	router.GET("/api-1", func(c *gin.Context) {
 		c.JSON(200, gin.H{"success": "Access granted for api-1"})
 	})
